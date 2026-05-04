@@ -1,3 +1,18 @@
+
+# === SAM'S HARDCODED ANSWERS (overrides AI) ===
+years_of_experience = "0"
+total_experience_years = 0
+experience_in_years = 0
+notice_period = "Immediate"
+current_ctc = "0"
+expected_ctc = "300000"
+current_salary = "0"
+expected_salary = "300000"
+node_js_experience = "0"
+react_experience = "0"
+angular_experience = "0"
+python_experience = "0"
+
 '''
 Author:     Sai Vignesh Golla
 LinkedIn:   https://www.linkedin.com/in/saivigneshgolla/

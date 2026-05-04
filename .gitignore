@@ -1,14 +1,8 @@
-__pycache__
-.vscode
-.idea
-
-all excels
-all resumes
-logs
-
-old
-
-secrets.py
-config/personals.py
-.venv
-apikeys.py
+__pycache__/
+*.pyc
+logs/
+*.log
+.env
+*.xlsx
+chromedriver*
+*.exe
