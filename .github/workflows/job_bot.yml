@@ -11,20 +11,19 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: |
+          sudo apt-get install -y xvfb chromium-browser chromium-chromedriver
           pip install -r requirements.txt
-          pip install groq python-dotenv requests supabase
+          pip install groq python-dotenv requests supabase pyautogui selenium webdriver-manager
 
-      - name: Patch secrets into config
+      - name: Patch config secrets
         run: |
           sed -i "s/username = .*/username = \"${{ secrets.LINKEDIN_USERNAME }}\"/" config/secrets.py
           sed -i "s/password = .*/password = \"${{ secrets.LINKEDIN_PASSWORD }}\"/" config/secrets.py
@@ -33,20 +32,29 @@ jobs:
           sed -i "s/llm_model = .*/llm_model = \"llama3-8b-8192\"/" config/secrets.py
           sed -i "s/ai_provider = .*/ai_provider = \"openai\"/" config/secrets.py
 
-      - name: Run job applier
+      - name: Notify start
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="🤖 Job bot started applying..."
+
+      - name: Run bot
         env:
+          DISPLAY: ':99'
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          DISPLAY: ':99'
         run: |
           Xvfb :99 -screen 0 1920x1080x24 &
-          python runAiBot.py || python cloud_bot.py
+          sleep 2
+          python runAiBot.py 2>&1 | tee bot_output.log
+          echo "EXIT_CODE=$?" >> $GITHUB_ENV
 
-      - name: Notify on failure
-        if: failure()
+      - name: Notify result
+        if: always()
         run: |
+          RESULT=$(tail -20 bot_output.log 2>/dev/null | tr '\n' ' ' | cut -c1-200)
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d text="⚠️ Job bot FAILED. Check: https://github.com/saminathanms2004-stack/sam-job-bot/actions"
+            -d text="✅ Job bot done! Output: ${RESULT:-No output captured}"
