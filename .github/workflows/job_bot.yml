@@ -1,4 +1,4 @@
-﻿name: LinkedIn Job Applier Bot
+name: LinkedIn Job Applier Bot
 
 on:
   schedule:
@@ -17,26 +17,40 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install system deps
         run: |
-          sudo apt-get install -y xvfb chromium-browser chromium-chromedriver
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb chromium-browser chromium-chromedriver xdotool
           pip install -r requirements.txt
           pip install groq python-dotenv requests supabase pyautogui selenium webdriver-manager
 
       - name: Patch config secrets
         run: |
-          sed -i "s/username = .*/username = \"${{ secrets.LINKEDIN_USERNAME }}\"/" config/secrets.py
-          sed -i "s/password = .*/password = \"${{ secrets.LINKEDIN_PASSWORD }}\"/" config/secrets.py
-          sed -i "s/llm_api_key = .*/llm_api_key = \"${{ secrets.GROQ_API_KEY }}\"/" config/secrets.py
+          sed -i "s|username = .*|username = \"${{ secrets.LINKEDIN_USERNAME }}\"|" config/secrets.py
+          sed -i "s|password = .*|password = \"${{ secrets.LINKEDIN_PASSWORD }}\"|" config/secrets.py
+          sed -i "s|llm_api_key = .*|llm_api_key = \"${{ secrets.GROQ_API_KEY }}\"|" config/secrets.py
           sed -i "s|llm_api_url = .*|llm_api_url = \"https://api.groq.com/openai/v1/\"|" config/secrets.py
-          sed -i "s/llm_model = .*/llm_model = \"llama3-8b-8192\"/" config/secrets.py
-          sed -i "s/ai_provider = .*/ai_provider = \"openai\"/" config/secrets.py
+          sed -i "s|llm_model = .*|llm_model = \"llama3-8b-8192\"|" config/secrets.py
+          sed -i "s|ai_provider = .*|ai_provider = \"openai\"|" config/secrets.py
+
+      - name: Patch settings for CI
+        run: |
+          sed -i "s|run_in_background = .*|run_in_background = True|" config/settings.py
+          sed -i "s|safe_mode = .*|safe_mode = False|" config/settings.py
+          sed -i "s|keep_screen_awake = .*|keep_screen_awake = False|" config/settings.py
+          sed -i "s|smooth_scroll = .*|smooth_scroll = False|" config/settings.py
+          sed -i "s|pause_at_failed_question = .*|pause_at_failed_question = False|" config/settings.py
+          sed -i "s|pause_before_submit = .*|pause_before_submit = False|" config/settings.py
+
+      - name: Create required folders
+        run: |
+          mkdir -p "all excels" "all resumes" logs/screenshots
 
       - name: Notify start
         run: |
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d text="🤖 Job bot started applying..."
+            -d text="🤖 LinkedIn bot started..." || true
 
       - name: Run bot
         env:
@@ -47,14 +61,22 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           Xvfb :99 -screen 0 1920x1080x24 &
-          sleep 2
-          python runAiBot.py 2>&1 | tee bot_output.log
-          echo "EXIT_CODE=$?" >> $GITHUB_ENV
+          sleep 3
+          timeout 1500 python runAiBot.py 2>&1 | tee bot_output.log || true
+
+      - name: Save applied history
+        if: always()
+        run: |
+          git config --global user.name 'Bot'
+          git config --global user.email 'bot@bot.com'
+          git add "all excels/" logs/ || true
+          git diff --staged --quiet || git commit -m "update applied history"
+          git push || true
 
       - name: Notify result
         if: always()
         run: |
-          RESULT=$(tail -20 bot_output.log 2>/dev/null | tr '\n' ' ' | cut -c1-200)
+          RESULT=$(tail -30 bot_output.log 2>/dev/null | tr '\n' ' ' | cut -c1-300)
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d text="✅ Job bot done! Output: ${RESULT:-No output captured}"
+            -d text="✅ LinkedIn bot done! Log: ${RESULT:-No output}" || true
