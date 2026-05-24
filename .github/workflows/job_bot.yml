@@ -12,6 +12,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-python@v5
         with:
@@ -20,63 +23,69 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y xvfb chromium-browser chromium-chromedriver xdotool
+          sudo apt-get install -y xvfb chromium-browser chromium-chromedriver xauth x11-utils
+
+      - name: Install Python deps
+        run: |
           pip install -r requirements.txt
           pip install groq python-dotenv requests supabase pyautogui selenium webdriver-manager
 
       - name: Patch config secrets
         run: |
-          sed -i "s|username = .*|username = \"${{ secrets.LINKEDIN_USERNAME }}\"|" config/secrets.py
-          sed -i "s|password = .*|password = \"${{ secrets.LINKEDIN_PASSWORD }}\"|" config/secrets.py
-          sed -i "s|llm_api_key = .*|llm_api_key = \"${{ secrets.GROQ_API_KEY }}\"|" config/secrets.py
-          sed -i "s|llm_api_url = .*|llm_api_url = \"https://api.groq.com/openai/v1/\"|" config/secrets.py
-          sed -i "s|llm_model = .*|llm_model = \"llama3-8b-8192\"|" config/secrets.py
-          sed -i "s|ai_provider = .*|ai_provider = \"openai\"|" config/secrets.py
+          sed -i 's|username = .*|username = "'"${{ secrets.LINKEDIN_USERNAME }}"'"|' config/secrets.py
+          sed -i 's|password = .*|password = "'"${{ secrets.LINKEDIN_PASSWORD }}"'"|' config/secrets.py
+          sed -i 's|llm_api_key = .*|llm_api_key = "'"${{ secrets.GROQ_API_KEY }}"'"|' config/secrets.py
+          sed -i 's|llm_api_url = .*|llm_api_url = "https://api.groq.com/openai/v1/"|' config/secrets.py
+          sed -i 's|llm_model = .*|llm_model = "llama3-8b-8192"|' config/secrets.py
+          sed -i 's|ai_provider = .*|ai_provider = "openai"|' config/secrets.py
 
       - name: Patch settings for CI
         run: |
-          sed -i "s|run_in_background = .*|run_in_background = True|" config/settings.py
-          sed -i "s|safe_mode = .*|safe_mode = False|" config/settings.py
-          sed -i "s|keep_screen_awake = .*|keep_screen_awake = False|" config/settings.py
-          sed -i "s|smooth_scroll = .*|smooth_scroll = False|" config/settings.py
-          sed -i "s|pause_at_failed_question = .*|pause_at_failed_question = False|" config/settings.py
-          sed -i "s|pause_before_submit = .*|pause_before_submit = False|" config/settings.py
+          sed -i 's|run_in_background = .*|run_in_background = True|' config/settings.py
+          sed -i 's|safe_mode = .*|safe_mode = False|' config/settings.py
+          sed -i 's|keep_screen_awake = .*|keep_screen_awake = False|' config/settings.py
+          sed -i 's|smooth_scroll = .*|smooth_scroll = False|' config/settings.py
 
       - name: Create required folders
+        run: mkdir -p "all excels" "all resumes" logs/screenshots
+
+      - name: Start Xvfb + setup xauth
         run: |
-          mkdir -p "all excels" "all resumes" logs/screenshots
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          touch /home/runner/.Xauthority
+          xauth generate :99 . trusted 2>/dev/null || true
+          echo "Xvfb started"
 
       - name: Notify start
         run: |
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d text="🤖 LinkedIn bot started..." || true
+            -d text="LinkedIn bot started - $(date)" || true
 
       - name: Run bot
         env:
           DISPLAY: ':99'
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          XAUTHORITY: '/home/runner/.Xauthority'
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
-          Xvfb :99 -screen 0 1920x1080x24 &
-          sleep 3
           timeout 1500 python runAiBot.py 2>&1 | tee bot_output.log || true
+          echo "Bot finished"
 
       - name: Save applied history
-        if: always()
         run: |
           git config --global user.name 'Bot'
           git config --global user.email 'bot@bot.com'
           git add "all excels/" logs/ || true
           git diff --staged --quiet || git commit -m "update applied history"
-          git push || true
+          git push origin main || true
 
       - name: Notify result
         if: always()
         run: |
-          RESULT=$(tail -30 bot_output.log 2>/dev/null | tr '\n' ' ' | cut -c1-300)
+          LINES=$(wc -l < "all excels/all_applied_applications_history.csv" 2>/dev/null || echo 0)
+          RESULT=$(tail -5 bot_output.log 2>/dev/null | tr '\n' ' ' | cut -c1-250)
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d text="✅ LinkedIn bot done! Log: ${RESULT:-No output}" || true
+            -d text="Bot done. Total applied: $LINES. Last log: ${RESULT:-none}" || true
